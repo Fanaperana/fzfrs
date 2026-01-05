@@ -2,8 +2,23 @@
 name = "fzfrs"
 version = "0.1.0"
 edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "A comprehensive, educational implementation of fuzzy search algorithms using Levenshtein distance"
+license = "MIT"
+repository = "https://github.com/yourusername/fzfrs"
+documentation = "https://github.com/yourusername/fzfrs#readme"
+readme = "README.md"
+keywords = ["fuzzy-search", "levenshtein", "edit-distance", "string-matching", "algorithm"]
+categories = ["algorithms", "text-processing"]
 
 [dependencies]
-crossterm = "0.28.1"
-ratatui = "0.29.0"
-walkdir = "2.5.0"
+
+[dev-dependencies]
+
+[lib]
+name = "fzfrs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fzfrs"
+path = "src/main.rs"
