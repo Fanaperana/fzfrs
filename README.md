@@ -1,7 +1,13 @@
 # fuzzly - Fuzzy Search Algorithm Implementation
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust](https://img.shields.io/badge/rust-%23000000.svg?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+<p align="center">
+    <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
+    <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-%23000000.svg?logo=rust&logoColor=white" alt="Rust" /></a>
+    <a href="https://github.com/Fanaperana/fuzzy-search-rs/releases"><img src="https://img.shields.io/github/v/release/Fanaperana/fuzzy-search-rs" alt="GitHub release" /></a>
+    <a href="https://fanaperana.github.io/fuzzy-search-rs/"><img src="https://img.shields.io/badge/docs-live-orange" alt="Docs" /></a>
+    <a href="https://github.com/Fanaperana/fuzzy-search-rs/actions/workflows/deploy-pages.yml"><img src="https://github.com/Fanaperana/fuzzy-search-rs/actions/workflows/deploy-pages.yml/badge.svg" alt="Deploy GitHub Pages" /></a>
+    <a href="https://github.com/Fanaperana/fuzzy-search-rs/stargazers"><img src="https://img.shields.io/github/stars/Fanaperana/fuzzy-search-rs?style=social" alt="GitHub stars" /></a>
+</p>
 
 <p align="center">
   <img src="docs/Fuzzly_logo.png" width="620" alt="fuzzly — fuzzy search algorithm in Rust" />
