@@ -2,7 +2,7 @@
 name = "fuzzly"
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Fanaperana"]
 description = "A comprehensive, educational implementation of fuzzy search algorithms using Levenshtein distance"
 license = "MIT"
 repository = "https://github.com/Fanaperana/fuzzy-search-rs"
@@ -20,7 +20,7 @@ categories = ["algorithms", "text-processing"]
 [dependencies]
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8.2", features = ["html_reports"] }
 
 [[bench]]
 name = "fuzzy_search"
