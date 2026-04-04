@@ -11,6 +11,8 @@
 
 A **comprehensive, educational implementation** of fuzzy search algorithms in Rust. This repository is designed to help developers understand and implement fuzzy search in any programming language.
 
+Quick links: [Docs site](https://fanaperana.github.io/fuzzy-search-rs/) · [First release](https://github.com/Fanaperana/fuzzy-search-rs/releases/tag/v0.1.0) · [Discussions](https://github.com/Fanaperana/fuzzy-search-rs/discussions)
+
 ## 🎯 What is Fuzzy Search?
 
 Fuzzy search (also known as approximate string matching) finds strings that **approximately match** a pattern, rather than requiring an exact match. This is useful for:
@@ -239,13 +241,20 @@ fn main() {
 ## 🏗️ Project Structure
 
 ```
-fuzzly/
-├── Cargo.toml          # Project configuration
+fuzzy-search-rs/
+├── .github/            # Workflows, issue templates, PR template, discussions
+├── benches/            # Criterion benchmarks
+├── docs/               # GitHub Pages site and branding assets
+├── src/
+│   ├── lib.rs          # Library: Levenshtein + fuzzy-search implementations
+│   └── main.rs         # CLI/demo entry point
+├── CHANGELOG.md        # Release notes by version
+├── CODE_OF_CONDUCT.md  # Community expectations
+├── CONTRIBUTING.md     # Contribution guide
+├── Cargo.toml          # Project metadata and dependencies
 ├── LICENSE             # MIT License
-├── README.md           # This file
-└── src/
-    ├── lib.rs          # Library: All fuzzy search implementations
-    └── main.rs         # Example: Demonstrates usage
+├── README.md           # Project overview and usage guide
+└── SECURITY.md         # Security reporting guidance
 ```
 
 ---
@@ -466,11 +475,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🤝 Contributing
 
-Contributions are welcome! Feel free to:
-- Report bugs
-- Suggest features
-- Submit pull requests
-- Add implementations in other languages
+Contributions are welcome.
+
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request
+- Use [Discussions](https://github.com/Fanaperana/fuzzy-search-rs/discussions) for questions and ideas
+- Open issues for bugs or feature requests using the repository templates
+- Report sensitive issues through the guidance in [SECURITY.md](SECURITY.md)
 
 ---
 
