@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest an improvement for fuzzly
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Please describe the problem and the improvement you want to see.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What is missing or difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Benchmarks, examples, API sketches, screenshots, or related projects

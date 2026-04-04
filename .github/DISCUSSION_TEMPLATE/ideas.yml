@@ -1,0 +1,14 @@
+title: Ideas
+labels:
+  - ideas
+body:
+  - type: markdown
+    attributes:
+      value: Share improvements, feature concepts, or UX ideas for fuzzly.
+  - type: textarea
+    id: idea
+    attributes:
+      label: Idea
+      description: What would you like to discuss?
+    validations:
+      required: true

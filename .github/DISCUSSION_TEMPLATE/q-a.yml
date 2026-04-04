@@ -1,0 +1,14 @@
+title: Q&A
+labels:
+  - q-and-a
+body:
+  - type: markdown
+    attributes:
+      value: Ask usage questions, algorithm questions, or implementation questions here.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What do you want help with?
+    validations:
+      required: true
