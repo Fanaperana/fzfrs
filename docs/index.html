@@ -14,52 +14,52 @@
   <link rel="canonical" href="https://fanaperana.github.io/fuzzy-search-rs/" />
 
   <!-- ── Open Graph (Facebook, LinkedIn, Discord, Slack …) ──────────────── -->
-  <meta property="og:type"        content="website" />
-  <meta property="og:url"         content="https://fanaperana.github.io/fuzzy-search-rs/" />
-  <meta property="og:title"       content="fuzzly — Learn Fuzzy Search Algorithms" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://fanaperana.github.io/fuzzy-search-rs/" />
+  <meta property="og:title" content="fuzzly — Learn Fuzzy Search Algorithms" />
   <meta property="og:description" content="Interactive Levenshtein distance visualizer, side-by-side implementation comparisons, and real benchmarks. Everything you need to understand and implement fuzzy search — beginner friendly." />
-  <meta property="og:image"       content="https://fanaperana.github.io/fuzzy-search-rs/og-image.png" />
-  <meta property="og:image:width"  content="1200" />
-  <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt"   content="fuzzly — interactive fuzzy search algorithm learning site" />
-  <meta property="og:locale"      content="en_US" />
-  <meta property="og:site_name"   content="fuzzly" />
+  <meta property="og:image" content="https://fanaperana.github.io/fuzzy-search-rs/Fuzzly_logo.png" />
+  <meta property="og:image:width" content="1536" />
+  <meta property="og:image:height" content="1024" />
+  <meta property="og:image:alt" content="fuzzly — interactive fuzzy search algorithm learning site" />
+  <meta property="og:locale" content="en_US" />
+  <meta property="og:site_name" content="fuzzly" />
 
   <!-- ── Twitter / X Card ──────────────────────────────────────────────── -->
-  <meta name="twitter:card"        content="summary_large_image" />
-  <meta name="twitter:site"        content="@Fanaperana" />
-  <meta name="twitter:creator"     content="@Fanaperana" />
-  <meta name="twitter:title"       content="fuzzly — Learn Fuzzy Search Algorithms" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:site" content="@Fanaperana" />
+  <meta name="twitter:creator" content="@Fanaperana" />
+  <meta name="twitter:title" content="fuzzly — Learn Fuzzy Search Algorithms" />
   <meta name="twitter:description" content="Interactive visualizer, annotated Rust code, and benchmarks. Understand how fuzzy search works from the ground up." />
-  <meta name="twitter:image"       content="https://fanaperana.github.io/fuzzy-search-rs/og-image.png" />
-  <meta name="twitter:image:alt"   content="fuzzly — interactive fuzzy search site" />
+  <meta name="twitter:image" content="https://fanaperana.github.io/fuzzy-search-rs/Fuzzly_logo.png" />
+  <meta name="twitter:image:alt" content="fuzzly — interactive fuzzy search site" />
 
   <!-- ── JSON-LD Structured Data ───────────────────────────────────────── -->
   <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "SoftwareSourceCode",
-    "name": "fuzzly",
-    "description": "A comprehensive, educational implementation of fuzzy search algorithms in Rust using Levenshtein distance. Includes interactive visualizations, annotated source code, and benchmark comparisons.",
-    "url": "https://fanaperana.github.io/fuzzy-search-rs/",
-    "codeRepository": "https://github.com/Fanaperana/fuzzy-search-rs",
-    "programmingLanguage": {
-      "@type": "ComputerLanguage",
-      "name": "Rust"
-    },
-    "author": {
-      "@type": "Person",
-      "name": "Fanaperana",
-      "url": "https://github.com/Fanaperana"
-    },
-    "license": "https://opensource.org/licenses/MIT",
-    "keywords": "fuzzy search, levenshtein distance, edit distance, string matching, Rust, algorithm, dynamic programming",
-    "dateModified": "2026-04-03",
-    "inLanguage": "en",
-    "isAccessibleForFree": true,
-    "educationalLevel": "beginner",
-    "learningResourceType": "interactive visualization"
-  }
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareSourceCode",
+      "name": "fuzzly",
+      "description": "A comprehensive, educational implementation of fuzzy search algorithms in Rust using Levenshtein distance. Includes interactive visualizations, annotated source code, and benchmark comparisons.",
+      "url": "https://fanaperana.github.io/fuzzy-search-rs/",
+      "codeRepository": "https://github.com/Fanaperana/fuzzy-search-rs",
+      "programmingLanguage": {
+        "@type": "ComputerLanguage",
+        "name": "Rust"
+      },
+      "author": {
+        "@type": "Person",
+        "name": "Fanaperana",
+        "url": "https://github.com/Fanaperana"
+      },
+      "license": "https://opensource.org/licenses/MIT",
+      "keywords": "fuzzy search, levenshtein distance, edit distance, string matching, Rust, algorithm, dynamic programming",
+      "dateModified": "2026-04-03",
+      "inLanguage": "en",
+      "isAccessibleForFree": true,
+      "educationalLevel": "beginner",
+      "learningResourceType": "interactive visualization"
+    }
   </script>
 
   <!-- ── Favicons ───────────────────────────────────────────────────────── -->
@@ -210,6 +210,11 @@
       color: var(--accent);
     }
 
+    .nav-logo-img {
+      height: 30px;
+      width: auto;
+    }
+
     .nav-links {
       display: flex;
       gap: 1.75rem;
@@ -326,6 +331,13 @@
     .hero-badge::before {
       content: '●';
       font-size: .55rem;
+    }
+
+    .hero-logo {
+      width: 260px;
+      max-width: 100%;
+      margin-bottom: 1.5rem;
+      border-radius: 12px;
     }
 
     h1.hero-title {
@@ -1348,6 +1360,11 @@
       color: var(--accent);
     }
 
+    .footer-logo-img {
+      height: 26px;
+      width: auto;
+    }
+
     .footer-links {
       display: flex;
       gap: 1.5rem;
@@ -1366,6 +1383,59 @@
     .footer-right {
       font-size: .8rem;
       color: var(--text3);
+    }
+
+    /* ── Star banner ─────────────────────────────────────────────── */
+    #star-banner {
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(135deg, rgba(224, 90, 43, 0.09) 0%, rgba(8, 12, 20, 0) 70%);
+      padding: 3.5rem 0;
+    }
+
+    .star-inner {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 1rem;
+    }
+
+    .star-emoji {
+      font-size: 2.4rem;
+    }
+
+    .star-text h3 {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 0.4rem;
+    }
+
+    .star-text p {
+      font-size: 0.925rem;
+      color: var(--text2);
+      max-width: 520px;
+      line-height: 1.65;
+    }
+
+    .btn-star {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: #f5c518;
+      color: #1a1200;
+      font-weight: 700;
+      padding: 0.65rem 1.4rem;
+      border-radius: 8px;
+      font-size: 1rem;
+      margin-top: 0.5rem;
+      transition: transform .15s, opacity .15s;
+    }
+
+    .btn-star:hover {
+      transform: translateY(-2px);
+      opacity: 0.9;
     }
 
     /* ── Scroll reveal ───────────────────────────────────────────────── */
@@ -1423,7 +1493,7 @@
   <!-- ── Navigation ──────────────────────────────────────────────────────── -->
   <nav>
     <div class="wrap nav-inner">
-      <a href="#" class="nav-logo">🔍 <span>fuzz</span><span class="dot">ly</span></a>
+      <a href="#" class="nav-logo"><img src="Fuzzly_logo.png" class="nav-logo-img" alt="fuzzly" /></a>
       <ul class="nav-links">
         <li><a href="#what">Learn</a></li>
         <li><a href="#algorithm">Algorithm</a></li>
@@ -1442,6 +1512,7 @@
     <div class="wrap">
       <div class="hero-grid">
         <div class="hero-left">
+          <img src="Fuzzly_logo.png" class="hero-logo" alt="fuzzly logo" />
           <div class="hero-badge">Educational Open Source · Rust</div>
           <h1 class="hero-title">Fuzzy Search,<br><span class="grad">Built to Learn From</span></h1>
           <p class="hero-desc">
@@ -1973,10 +2044,22 @@ println!(<span class="st">"{}"</span>, result);
     </div>
   </section>
 
+  <!-- ── Star Banner ───────────────────────────────────────────────────── -->
+  <section id="star-banner">
+    <div class="wrap star-inner">
+      <div class="star-emoji">⭐</div>
+      <div class="star-text">
+        <h3>Enjoying fuzzly? Give it a star!</h3>
+        <p>If this project helped you understand fuzzy search or Levenshtein algorithms, a GitHub star means the world. It helps others discover the project and motivates continued work.</p>
+      </div>
+      <a href="https://github.com/Fanaperana/fuzzy-search-rs" class="btn-star" target="_blank">⭐ Star on GitHub</a>
+    </div>
+  </section>
+
   <!-- ── Footer ────────────────────────────────────────────────────────── -->
   <footer>
     <div class="wrap footer-inner">
-      <div class="footer-logo">🔍 <span>fuzz</span><span class="dot">ly</span></div>
+      <div class="footer-logo"><img src="Fuzzly_logo.png" class="footer-logo-img" alt="fuzzly" /></div>
       <div class="footer-links">
         <a href="https://github.com/Fanaperana/fuzzy-search-rs" target="_blank">GitHub</a>
         <a href="https://en.wikipedia.org/wiki/Levenshtein_distance" target="_blank">Levenshtein Distance</a>

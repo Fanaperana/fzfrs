@@ -3,6 +3,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-%23000000.svg?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 
+<p align="center">
+  <img src="docs/Fuzzly_logo.png" width="620" alt="fuzzly — fuzzy search algorithm in Rust" />
+</p>
+
+> ⭐ **If fuzzly helped you learn**, please [leave a star on GitHub](https://github.com/Fanaperana/fuzzy-search-rs)! It helps others discover the project and keeps the motivation going.
+
 A **comprehensive, educational implementation** of fuzzy search algorithms in Rust. This repository is designed to help developers understand and implement fuzzy search in any programming language.
 
 ## 🎯 What is Fuzzy Search?
