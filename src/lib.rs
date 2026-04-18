@@ -451,14 +451,21 @@ impl LevenshteinDistance {
     ///
     /// This method selects the best implementation automatically:
     ///
-    /// - **ASCII strings** → [`fast_bytes`](Self::fast_bytes): works on raw bytes,
-    ///   skipping the `Vec<char>` allocation entirely.
-    /// - **Unicode strings** → [`fast_chars`](Self::fast_chars): falls back to
-    ///   collecting chars, same as the other methods, but with `u32` cells.
+    /// 1. **ASCII + shorter string ≤ 64 chars** → [`compute_myers`](Self::compute_myers):
+    ///    Myers' 1999 bit-parallel algorithm.  The whole DP column is packed
+    ///    into a single 64-bit word and advanced by ~7 bitwise ops per text
+    ///    character, giving **O(n)** per candidate instead of O(m·n).  Typically
+    ///    5–20× faster than even the cache-tuned two-row DP.
+    /// 2. **ASCII otherwise** → [`fast_bytes`](Self::fast_bytes): two-row DP
+    ///    over raw bytes, skipping the `Vec<char>` allocation entirely.
+    /// 3. **Unicode** → [`fast_chars`](Self::fast_chars): same DP over
+    ///    `&[char]` for non-ASCII input.
     ///
-    /// Both paths use `u32` (4 bytes) per DP cell instead of `usize` (8 bytes on
-    /// 64-bit), so the two rolling rows fit into half the cache space, which matters
-    /// when the strings are long.
+    /// Paths (2) and (3) also choose the **narrowest possible DP cell type**
+    /// (`u8`, `u16`, or `u32`) based on `max(m, n)`.  Because the gap cost is
+    /// 1, no cell can ever exceed `max(m, n)`, so for strings under 256
+    /// characters we store each cell in a single byte — 8× smaller than
+    /// `usize` and 4× smaller than `u32`.
     ///
     /// **Why read this last?** Understanding `compute` and `compute_optimized` first
     /// makes the optimisations here much easier to appreciate.
@@ -473,15 +480,67 @@ impl LevenshteinDistance {
     /// ```
     pub fn compute_fast(source: &str, target: &str) -> usize {
         if source.is_ascii() && target.is_ascii() {
+            let a = source.as_bytes();
+            let b = target.as_bytes();
+            // Myers needs the shorter string (the "pattern") to fit in one 64-bit
+            // word.  `min(m, n) ≤ 64` is equivalent to "at least one of the two
+            // strings is ≤ 64 chars", which covers the overwhelming common case
+            // in fuzzy matching (queries, identifiers, filenames).
+            if a.len().min(b.len()) <= 64 {
+                return myers_bytes(a, b);
+            }
             // ASCII guarantee: every character is exactly one byte, so a byte index
             // is the same as a character index.  We can skip Vec<char> entirely.
-            Self::fast_bytes(source.as_bytes(), target.as_bytes())
+            Self::fast_bytes(a, b)
         } else {
             // Non-ASCII (emoji, accented letters, CJK, …): fall back to char slices.
             let src: Vec<char> = source.chars().collect();
             let tgt: Vec<char> = target.chars().collect();
             Self::fast_chars(&src, &tgt)
         }
+    }
+
+    /// Myers' 1999 bit-parallel Levenshtein distance — the fastest path.
+    ///
+    /// Packs the entire DP column into a single `u64` and advances it one
+    /// text character at a time using ~7 bitwise operations.  This turns the
+    /// classic O(m·n) inner loop into **O(n) word operations**, a dramatic
+    /// speedup whenever the shorter string fits in one machine word
+    /// (≤ 64 characters) — which is virtually always true for interactive
+    /// fuzzy search.
+    ///
+    /// ## Requirements and fallback
+    ///
+    /// - **Alphabet**: ASCII bytes only.  The algorithm needs an `Eq` table
+    ///   indexed by character; for Unicode we'd need a `HashMap` which erases
+    ///   the speedup.  Non-ASCII input falls back to [`compute_fast`].
+    /// - **Length**: the shorter string (`min(m, n)`) must be ≤ 64.  Longer
+    ///   patterns would require the multi-word "block" variant of Myers which
+    ///   is not yet implemented here; we fall back to [`compute_fast`].
+    ///
+    /// ## Reference
+    ///
+    /// Gene Myers, *"A fast bit-vector algorithm for approximate string
+    /// matching based on dynamic programming"*, J. ACM 46(3), 1999.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use fuzzly::LevenshteinDistance;
+    ///
+    /// assert_eq!(LevenshteinDistance::compute_myers("kitten", "sitting"), 3);
+    /// assert_eq!(LevenshteinDistance::compute_myers("", "abc"), 3);
+    /// ```
+    pub fn compute_myers(source: &str, target: &str) -> usize {
+        if source.is_ascii() && target.is_ascii() {
+            let a = source.as_bytes();
+            let b = target.as_bytes();
+            if a.len().min(b.len()) <= 64 {
+                return myers_bytes(a, b);
+            }
+        }
+        // Fall back to the next-best path if Myers' preconditions aren't met.
+        Self::compute_fast(source, target)
     }
 
     // ── fast_bytes ────────────────────────────────────────────────────────────
@@ -491,10 +550,23 @@ impl LevenshteinDistance {
     //   ASCII characters are all in the range 0x00–0x7F and each fits in exactly
     //   one byte.  `str::as_bytes()` gives us a &[u8] with no heap allocation.
     //
-    // Optimisation 2 – u32 cells (4 bytes) instead of usize (8 bytes on 64-bit):
-    //   A string would have to be > 4 billion characters long to overflow u32.
-    //   Using u32 means the two rolling rows take half as much memory, which
-    //   keeps them in CPU cache longer and improves throughput on medium/long strings.
+    // Optimisation 2 – adaptive DP cell width (u8 / u16 / u32):
+    //   The Levenshtein recurrence with gap cost G = 1 guarantees that every
+    //   cell in the DP matrix satisfies
+    //       matrix[i][j] ≤ max(i, j) ≤ max(m, n)
+    //   because the trivial "delete all, insert all" alignment already achieves
+    //   that bound and the algorithm only ever picks something ≤ that.
+    //
+    //   So the maximum value we'll ever store fits in:
+    //     - u8   when max(m, n) ≤ 255
+    //     - u16  when max(m, n) ≤ 65_535
+    //     - u32  for anything larger (a 4-billion-char string is absurd in practice)
+    //
+    //   Smaller cells means the two rolling rows take less memory and a much
+    //   larger fraction fits into L1/L2 cache, which is the dominant cost in
+    //   this memory-bound inner loop.  Going from u32 → u8 is a 4× shrink of
+    //   the working set for short strings (the overwhelming common case for
+    //   fuzzy matching — search queries, identifier names, filenames…).
     fn fast_bytes(src: &[u8], tgt: &[u8]) -> usize {
         let m = src.len();
         let n = tgt.len();
@@ -506,24 +578,18 @@ impl LevenshteinDistance {
         }
         // Keep the shorter sequence in the column dimension (smaller row allocation).
         let (src, tgt) = if m < n { (tgt, src) } else { (src, tgt) };
-        let (m, n) = (src.len(), tgt.len());
 
-        let mut prev: Vec<u32> = (0..=(n as u32)).collect(); // base row: [0, 1, 2, …, n]
-        let mut curr: Vec<u32> = vec![0u32; n + 1]; // scratch buffer, reused each row
-
-        for i in 1..=m {
-            curr[0] = i as u32; // cost of deleting all of src[0..i]
-            let s = src[i - 1]; // current source byte, hoisted out of the inner loop
-            for j in 1..=n {
-                // u32::from(bool) gives 0 when characters match, 1 when they differ.
-                let cost = u32::from(s != tgt[j - 1]);
-                curr[j] = (curr[j - 1] + 1) // insertion
-                    .min(prev[j] + 1) // deletion
-                    .min(prev[j - 1] + cost); // substitution / match
-            }
-            std::mem::swap(&mut prev, &mut curr); // roll forward
+        // Dispatch on the maximum possible distance to pick the narrowest cell
+        // type that cannot overflow.  `src` is the longer of the two by the
+        // swap above, so `src.len()` is the true max(m, n).
+        let max_dist = src.len();
+        if max_dist <= u8::MAX as usize {
+            fast_bytes_dp::<u8>(src, tgt)
+        } else if max_dist <= u16::MAX as usize {
+            fast_bytes_dp::<u16>(src, tgt)
+        } else {
+            fast_bytes_dp::<u32>(src, tgt)
         }
-        prev[n] as usize
     }
 
     // ── fast_chars ────────────────────────────────────────────────────────────
@@ -539,24 +605,194 @@ impl LevenshteinDistance {
             return m;
         }
         let (src, tgt) = if m < n { (tgt, src) } else { (src, tgt) };
-        let (m, n) = (src.len(), tgt.len());
 
-        let mut prev: Vec<u32> = (0..=(n as u32)).collect();
-        let mut curr: Vec<u32> = vec![0u32; n + 1];
-
-        for i in 1..=m {
-            curr[0] = i as u32;
-            let s = src[i - 1];
-            for j in 1..=n {
-                let cost = u32::from(s != tgt[j - 1]);
-                curr[j] = (curr[j - 1] + 1) // insertion
-                    .min(prev[j] + 1) // deletion
-                    .min(prev[j - 1] + cost); // substitution / match
-            }
-            std::mem::swap(&mut prev, &mut curr);
+        let max_dist = src.len();
+        if max_dist <= u8::MAX as usize {
+            fast_chars_dp::<u8>(src, tgt)
+        } else if max_dist <= u16::MAX as usize {
+            fast_chars_dp::<u16>(src, tgt)
+        } else {
+            fast_chars_dp::<u32>(src, tgt)
         }
-        prev[n] as usize
     }
+}
+
+// ── DP cell trait ─────────────────────────────────────────────────────────────
+// Tiny abstraction over u8 / u16 / u32 so the same inner loop can be monomorphised
+// into three specialised copies by the compiler.  Each concrete type produces its
+// own tight loop with no dynamic dispatch.
+trait DpCell: Copy + Ord {
+    const ONE: Self;
+    fn from_usize(v: usize) -> Self;
+    fn to_usize(self) -> usize;
+    fn add(self, rhs: Self) -> Self;
+}
+
+macro_rules! impl_dp_cell {
+    ($t:ty) => {
+        impl DpCell for $t {
+            const ONE: Self = 1;
+            #[inline(always)]
+            fn from_usize(v: usize) -> Self {
+                v as $t
+            }
+            #[inline(always)]
+            fn to_usize(self) -> usize {
+                self as usize
+            }
+            #[inline(always)]
+            fn add(self, rhs: Self) -> Self {
+                // Safe: caller guarantees every value ≤ max(m, n), which fits in $t.
+                self.wrapping_add(rhs)
+            }
+        }
+    };
+}
+impl_dp_cell!(u8);
+impl_dp_cell!(u16);
+impl_dp_cell!(u32);
+
+// ── Myers' 1999 bit-parallel Levenshtein (single-word variant) ───────────────
+//
+// Instead of storing each DP cell as an integer, Myers encodes the *differences*
+// between consecutive cells in a DP column as two bit-vectors:
+//
+//   Pv bit i = 1  iff  col[i+1] - col[i] == +1   ("vertical positive delta")
+//   Mv bit i = 1  iff  col[i+1] - col[i] == -1   ("vertical negative delta")
+//
+// The running score is the value of the bottom cell of the current column,
+// maintained as a plain integer.  Advancing one column (consuming one text
+// character) is done with a fixed sequence of ~7 bitwise operations over
+// 64-bit words — no loops over the column.  This is where the O(n) comes from
+// when the pattern fits in one machine word.
+//
+// The update formulas below are the classic ones from Myers' paper; see
+// "A fast bit-vector algorithm for approximate string matching based on
+// dynamic programming", J. ACM 46(3), 1999, Figure 8.
+//
+// Preconditions:
+//   - `p` and `t` are byte slices (treat each byte as an alphabet symbol)
+//   - caller guarantees `min(p.len(), t.len()) <= 64`; we swap so the shorter
+//     string becomes the "pattern" and fits in one u64.
+#[inline]
+fn myers_bytes(a: &[u8], b: &[u8]) -> usize {
+    // Put the shorter string into `p` (the pattern that fits in one u64).
+    let (p, t) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+    let m = p.len();
+    if m == 0 {
+        return t.len();
+    }
+    debug_assert!(m <= 64, "myers_bytes requires min(m,n) ≤ 64");
+
+    // Peq[c] = bitmask of positions in `p` where byte c occurs.
+    // Inputs are pre-validated ASCII (every byte < 128), so 128 slots are enough.
+    // Halving the table vs. a full 256-entry version roughly halves the prelude
+    // cost, which matters when `t` is very short (tens of nanoseconds total).
+    let mut peq = [0u64; 128];
+    for (i, &c) in p.iter().enumerate() {
+        peq[(c & 0x7F) as usize] |= 1u64 << i;
+    }
+
+    // Mask of the low `m` bits (the only bits we care about).  Using `<<` with
+    // shift amount equal to the word width is UB in Rust, hence the branch.
+    let mask: u64 = if m == 64 { u64::MAX } else { (1u64 << m) - 1 };
+    let top_bit: u64 = 1u64 << (m - 1);
+
+    // Initial column state corresponds to comparing "" against "": all cells
+    // have +1 deltas (column is 0,1,2,…,m), so Pv = all-ones, Mv = 0, score = m.
+    let mut pv: u64 = mask;
+    let mut mv: u64 = 0;
+    let mut score: usize = m;
+
+    // Advance one text character per iteration.
+    for &c in t {
+        let eq = peq[(c & 0x7F) as usize];
+
+        // Horizontal deltas, derived from the current column + Eq.
+        let xv = eq | mv;
+        // The carry trick that makes Myers work: adding Pv to (Eq & Pv) lets the
+        // carry propagate through runs of matches in one step — which is exactly
+        // what the min-propagation in the DP inner loop would do.
+        let xh = (((eq & pv).wrapping_add(pv)) ^ pv) | eq;
+
+        let mut ph = mv | !(xh | pv);
+        let mut mh = pv & xh;
+
+        // Adjust the running score from the horizontal delta at the bottom row.
+        if ph & top_bit != 0 {
+            score += 1;
+        }
+        if mh & top_bit != 0 {
+            score -= 1;
+        }
+
+        // Shift horizontal deltas up to become the vertical deltas of the next
+        // column.  The low bit of Ph is always 1 (first row horizontal delta).
+        ph = (ph << 1) | 1;
+        mh <<= 1;
+
+        pv = (mh & mask) | !((xv | ph) & mask);
+        pv &= mask;
+        mv = ph & xv & mask;
+    }
+
+    score
+}
+
+// Generic two-row DP over byte slices, parametric in the cell type.
+#[inline]
+fn fast_bytes_dp<T: DpCell>(src: &[u8], tgt: &[u8]) -> usize {
+    let m = src.len();
+    let n = tgt.len();
+
+    let mut prev: Vec<T> = (0..=n).map(T::from_usize).collect();
+    let mut curr: Vec<T> = vec![T::from_usize(0); n + 1];
+
+    for i in 1..=m {
+        curr[0] = T::from_usize(i);
+        let s = src[i - 1];
+        for j in 1..=n {
+            let cost = if s == tgt[j - 1] {
+                T::from_usize(0)
+            } else {
+                T::ONE
+            };
+            let ins = curr[j - 1].add(T::ONE);
+            let del = prev[j].add(T::ONE);
+            let sub = prev[j - 1].add(cost);
+            curr[j] = ins.min(del).min(sub);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[n].to_usize()
+}
+
+// Generic two-row DP over char slices, parametric in the cell type.
+#[inline]
+fn fast_chars_dp<T: DpCell>(src: &[char], tgt: &[char]) -> usize {
+    let m = src.len();
+    let n = tgt.len();
+
+    let mut prev: Vec<T> = (0..=n).map(T::from_usize).collect();
+    let mut curr: Vec<T> = vec![T::from_usize(0); n + 1];
+
+    for i in 1..=m {
+        curr[0] = T::from_usize(i);
+        let s = src[i - 1];
+        for j in 1..=n {
+            let cost = if s == tgt[j - 1] {
+                T::from_usize(0)
+            } else {
+                T::ONE
+            };
+            let ins = curr[j - 1].add(T::ONE);
+            let del = prev[j].add(T::ONE);
+            let sub = prev[j - 1].add(cost);
+            curr[j] = ins.min(del).min(sub);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[n].to_usize()
 }
 
 // ============================================================================
@@ -1151,6 +1387,56 @@ mod tests {
                 s2
             );
         }
+    }
+
+    #[test]
+    fn test_myers_matches_standard() {
+        // Cross-check Myers against the reference full-matrix implementation
+        // for every interesting edge case and a variety of string shapes.
+        let test_pairs: &[(&str, &str)] = &[
+            ("", ""),
+            ("a", ""),
+            ("", "a"),
+            ("abc", "abc"),
+            ("abc", "xyz"),
+            ("kitten", "sitting"),
+            ("saturday", "sunday"),
+            ("algorithm", "altruistic"),
+            ("hello world", "hello word"),
+            // Exercise pattern length at the 64-bit word boundary.
+            (
+                "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl",
+                "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkm",
+            ),
+            // Pattern > 64 on one side: triggers the fallback inside compute_myers.
+            (
+                "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl",
+                "the quick brown fox jumps over the lazy dog the quick brown fox jumps over",
+            ),
+        ];
+
+        for (s1, s2) in test_pairs {
+            let expected = LevenshteinDistance::compute(s1, s2);
+            let got = LevenshteinDistance::compute_myers(s1, s2);
+            assert_eq!(
+                got, expected,
+                "Myers mismatch for {:?} vs {:?}: got {}, expected {}",
+                s1, s2, got, expected
+            );
+            // compute_fast must also agree (it dispatches to Myers internally).
+            assert_eq!(LevenshteinDistance::compute_fast(s1, s2), expected);
+        }
+    }
+
+    #[test]
+    fn test_myers_unicode_falls_back() {
+        // Non-ASCII input must fall back to the generic DP path and still be correct.
+        let a = "naïve";
+        let b = "naive";
+        assert_eq!(
+            LevenshteinDistance::compute_myers(a, b),
+            LevenshteinDistance::compute(a, b)
+        );
     }
 
     #[test]

@@ -108,6 +108,12 @@ fn bench_levenshtein_comparison(c: &mut Criterion) {
             &(src, tgt),
             |b, (s, t)| b.iter(|| LevenshteinDistance::compute_fast(black_box(s), black_box(t))),
         );
+
+        group.bench_with_input(
+            BenchmarkId::new("4_compute_myers", label),
+            &(src, tgt),
+            |b, (s, t)| b.iter(|| LevenshteinDistance::compute_myers(black_box(s), black_box(t))),
+        );
     }
 
     group.finish();

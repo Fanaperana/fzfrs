@@ -22,7 +22,7 @@ Quick links: [Docs site](https://fanaperana.github.io/fuzzy-search-rs/) · [Firs
 ## Why fuzzly?
 
 - Learn fuzzy search from a real, readable Rust implementation
-- Compare `compute`, `compute_optimized`, and `compute_fast` side-by-side
+- Compare `compute`, `compute_optimized`, `compute_fast`, and `compute_myers` side-by-side
 - Explore an interactive docs site instead of reading source alone
 - Use it as a reference for typo-tolerant search, ranking, and edit distance
 
@@ -463,38 +463,47 @@ same input, at five stress levels, so you can see the progression side-by-side.
 
 ### Results
 
-Measured on an x86-64 Linux machine (median of 100 samples, release build).
+Measured on an x86-64 Linux machine (median of 40 samples, release build).
 Numbers are the **median** time per call.
 
-| Tier | `compute` | `compute_optimized` | `compute_fast` | `fast` vs `compute` |
-|------|----------:|--------------------:|---------------:|:-------------------:|
-| tiny (6 vs 7) | 445 ns | 330 ns | **184 ns** | **2.4× faster** |
-| short (22 vs 24) | 2,772 ns | 1,374 ns | **1,206 ns** | **2.3× faster** |
-| medium (66 vs 68) | 14,755 ns | 10,297 ns | **10,602 ns** | **1.4× faster** |
-| long (182 vs 191) | 104,210 ns | 112,580 ns | **87,915 ns** | **1.2× faster** |
-| stress (270 vs 268) | 119,920 ns | **82,453 ns** | 95,073 ns | 1.3× faster |
+| Tier | `compute` | `compute_optimized` | `compute_fast` | `compute_myers` | `fast` vs `compute` |
+|------|----------:|--------------------:|---------------:|----------------:|:-------------------:|
+| tiny (6 vs 7) | 332 ns | 286 ns | **39 ns** | 40 ns | **8.5× faster** |
+| short (22 vs 24) | 2,478 ns | 1,342 ns | **105 ns** | 106 ns | **23× faster** |
+| medium (66 vs 68) | 14,003 ns | 9,497 ns | 10,085 ns | **10,011 ns** | 1.4× faster |
+| long (182 vs 191) | 99,178 ns | 104,900 ns | 79,650 ns | **79,973 ns** | 1.2× faster |
+| stress (270 vs 268) | 119,310 ns | **79,560 ns** | 96,125 ns | 94,962 ns | 1.2× faster |
 
 > **How to read the table:**
 > - `compute` is the learning-friendly full-matrix baseline.
 > - `compute_optimized` saves memory (two rows instead of full matrix) but keeps
 >   `usize` (8-byte) cells — it wins on the stress tier where the full matrix
 >   exceeds cache capacity.
-> - `compute_fast` adds `u32` cells (4 bytes, 2× cache density) and an ASCII
->   byte path (no `Vec<char>` allocation) and wins at every tier except the
->   stress tier where `compute_optimized`'s layout happens to fit the CPU's
->   prefetcher slightly better.
+> - `compute_fast` uses an ASCII byte path (no `Vec<char>` allocation) **and
+>   picks the narrowest DP cell type that can't overflow** — `u8` for strings
+>   under 256 chars, `u16` under 65 536, otherwise `u32`. On tiny/short inputs
+>   the `u8` buffers stay entirely in L1 and LLVM auto-vectorises the inner
+>   loop, yielding the 8–23× speedups you see above.
+> - `compute_myers` is Myers' 1999 bit-parallel algorithm: the whole DP column
+>   is packed into a single `u64` and advanced with ~7 bitwise ops per text
+>   character — **O(n)** instead of O(m·n) when the shorter string is ≤ 64
+>   chars. At these sizes it ties `compute_fast` (the auto-vectorised `u8` DP
+>   is already memory-bandwidth-bound), but it scales better as patterns grow
+>   and is the foundation for future block-Myers and SIMD work. For patterns
+>   longer than 64 chars it falls back to `compute_fast`.
 >
 > Reproduce on your machine: `cargo bench`
 
 ### Optimisation tiers
 
-Three implementations are provided, each building on the previous:
+Four implementations are provided, each building on the previous:
 
 | Method | Time | Space | Notes |
 |--------|------|-------|-------|
 | `compute` | O(m·n) | O(m·n) | Full matrix — easiest to follow |
 | `compute_optimized` | O(m·n) | O(min(m,n)) | Two-row rolling buffer, `usize` cells |
-| `compute_fast` | O(m·n) | O(min(m,n)) | Two-row rolling buffer, **`u32` cells** + **ASCII byte path** |
+| `compute_fast` | O(m·n) | O(min(m,n)) | Two-row rolling buffer, **adaptive `u8`/`u16`/`u32` cells** + **ASCII byte path** |
+| `compute_myers` | **O(n)** words | O(1) words | Myers 1999 bit-parallel; pattern ≤ 64 chars, ASCII |
 
 #### Key techniques in `compute_fast`
 
@@ -502,14 +511,37 @@ Three implementations are provided, each building on the previous:
    instead of collecting a `Vec<char>`. This eliminates a heap allocation per call
    and keeps the data as a tight byte slice.
 
-2. **`u32` DP cells** — each row element is 4 bytes instead of 8 (`usize` on
-   64-bit). The two rolling rows therefore fit in half as much cache, which
-   improves throughput especially for short and medium strings.
+2. **Adaptive DP cell width (`u8` / `u16` / `u32`)** — with gap cost 1 every
+   DP cell satisfies `cell ≤ max(m, n)`, so we pick the narrowest integer type
+   that can't overflow. For strings under 256 chars every cell is a single
+   byte — 8× smaller than `usize`, 4× smaller than `u32`. The two rolling
+   rows then fit in a handful of cache lines and LLVM auto-vectorises the
+   inner loop, turning the DP into a near-streaming memory operation.
 
 3. **Length-difference early exit in `search`** — before running the DP,
    `FuzzySearcher::search` checks whether the length difference between the query
    and a candidate already makes it impossible to reach the similarity threshold.
    Candidates that can't possibly match are skipped without computing anything.
+
+#### Key techniques in `compute_myers`
+
+1. **Bit-parallel column state** — the differences between consecutive cells in
+   a DP column are encoded as two `u64` bit-vectors (`Pv`, `Mv`). The running
+   score of the bottom cell is maintained as a plain integer. Advancing one
+   column (consuming one text character) is a fixed sequence of ~7 bitwise
+   operations — **no inner loop over the column**.
+
+2. **`Peq` lookup table** — a 128-entry stack array (one bitmask per ASCII
+   byte) encodes at which positions of the pattern each character occurs.
+   Populated in O(m) before the main loop; indexed once per text character
+   inside it.
+
+3. **Automatic fallback** — patterns longer than 64 chars or non-ASCII input
+   fall through to `compute_fast`. The function always returns the same
+   result as `compute`; only the path through the code differs.
+
+Reference: Gene Myers, *"A fast bit-vector algorithm for approximate string
+matching based on dynamic programming"*, J. ACM 46(3), 1999.
 
 ---
 

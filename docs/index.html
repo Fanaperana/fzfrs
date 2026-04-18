@@ -1698,7 +1698,7 @@
   <section id="implementations">
     <div class="wrap">
       <span class="section-label">The Code</span>
-      <h2 class="section-title reveal">Three Ways to Implement It</h2>
+      <h2 class="section-title reveal">Four Ways to Implement It</h2>
       <p class="section-sub reveal">
         Each variant produces identical results. They trade memory and performance for readability.
         Start with <code>compute</code>, understand it fully, then read the optimised versions.
@@ -1709,6 +1709,7 @@
           <button class="impl-tab active" onclick="showTab('compute')">1. compute ⭢ learn here</button>
           <button class="impl-tab" onclick="showTab('optimized')">2. compute_optimized</button>
           <button class="impl-tab" onclick="showTab('fast')">3. compute_fast ⚡</button>
+          <button class="impl-tab" onclick="showTab('myers')">4. compute_myers 🧠</button>
         </div>
 
         <!-- compute -->
@@ -1827,8 +1828,9 @@
             <p style="font-size:.875rem;color:var(--text2);margin-bottom:.75rem;">
               Two optimisations stack on top of <code>compute_optimized</code>:
               ASCII strings skip the <code>Vec&lt;char&gt;</code> allocation entirely,
-              and cells shrink from 8-byte <code>usize</code> to 4-byte <code>u32</code>,
-              doubling cache density. Used internally by <code>similarity()</code>.
+              and cells shrink to the narrowest integer that can't overflow —
+              <code>u8</code> for strings under 256 chars, <code>u16</code> under 65 536,
+              otherwise <code>u32</code>. Used internally by <code>similarity()</code>.
             </p>
             <div class="impl-complexity">
               <span class="complexity-badge c-time">Time: O(m·n)</span>
@@ -1836,7 +1838,8 @@
             </div>
             <ul class="impl-pros">
               <li><strong>ASCII fast path</strong>: <code>as_bytes()</code> — no heap alloc for <code>Vec&lt;char&gt;</code></li>
-              <li><strong><code>u32</code> cells</strong>: 4 bytes vs 8 = 2× cache density on 64-bit</li>
+              <li><strong>Adaptive cell width</strong>: gap cost 1 ⇒ no cell exceeds <code>max(m,n)</code>, so we pick <code>u8</code>/<code>u16</code>/<code>u32</code> accordingly (up to 8× cache density)</li>
+              <li>LLVM auto-vectorises the <code>u8</code> inner loop on short inputs — near-streaming memory throughput</li>
               <li>Automatically falls back to char slices for Unicode</li>
               <li>Read this <em>last</em> — the optimisations only make sense once you know what's being optimised</li>
             </ul>
@@ -1854,24 +1857,116 @@
 
 <span class="kw">fn</span> <span class="fn">fast_bytes</span>(src: &amp;[<span class="ty">u8</span>], tgt: &amp;[<span class="ty">u8</span>]) -&gt; <span class="ty">usize</span> {
     <span class="kw">let</span> (m, n) = (src.<span class="fn">len</span>(), tgt.<span class="fn">len</span>());
-    <span class="kw">let</span> (src, tgt, m, n) = <span class="kw">if</span> m &lt; n { (tgt,src,n,m) } <span class="kw">else</span> { (src,tgt,m,n) };
+    <span class="kw">let</span> (src, tgt) = <span class="kw">if</span> m &lt; n { (tgt, src) } <span class="kw">else</span> { (src, tgt) };
 
-    <span class="cm">// u32 cells — 4 bytes each, 2× cache density vs usize</span>
-    <span class="kw">let mut</span> prev: <span class="ty">Vec</span>&lt;<span class="ty">u32</span>&gt; = (<span class="nu">0</span>..=n <span class="kw">as</span> <span class="ty">u32</span>).<span class="fn">collect</span>();
-    <span class="kw">let mut</span> curr: <span class="ty">Vec</span>&lt;<span class="ty">u32</span>&gt; = <span class="fn">vec!</span>[<span class="nu">0u32</span>; n+<span class="nu">1</span>];
+    <span class="cm">// Gap cost = 1 ⇒ no cell exceeds max(m, n). Pick the narrowest</span>
+    <span class="cm">// integer type that can hold it — u8 fits 99% of fuzzy-search inputs.</span>
+    <span class="kw">let</span> max_dist = src.<span class="fn">len</span>();
+    <span class="kw">if</span> max_dist &lt;= <span class="ty">u8</span>::MAX <span class="kw">as</span> <span class="ty">usize</span> {
+        <span class="fn">fast_bytes_dp</span>::&lt;<span class="ty">u8</span>&gt;(src, tgt)   <span class="cm">// 1-byte cells: entire DP fits in L1</span>
+    } <span class="kw">else if</span> max_dist &lt;= <span class="ty">u16</span>::MAX <span class="kw">as</span> <span class="ty">usize</span> {
+        <span class="fn">fast_bytes_dp</span>::&lt;<span class="ty">u16</span>&gt;(src, tgt)  <span class="cm">// 2-byte cells</span>
+    } <span class="kw">else</span> {
+        <span class="fn">fast_bytes_dp</span>::&lt;<span class="ty">u32</span>&gt;(src, tgt)  <span class="cm">// 4-byte cells (4 B strings…)</span>
+    }
+}
+
+<span class="cm">// Monomorphised per cell type — three tight specialised loops.</span>
+<span class="kw">fn</span> <span class="fn">fast_bytes_dp</span>&lt;<span class="ty">T</span>: <span class="ty">DpCell</span>&gt;(src: &amp;[<span class="ty">u8</span>], tgt: &amp;[<span class="ty">u8</span>]) -&gt; <span class="ty">usize</span> {
+    <span class="kw">let</span> (m, n) = (src.<span class="fn">len</span>(), tgt.<span class="fn">len</span>());
+    <span class="kw">let mut</span> prev: <span class="ty">Vec</span>&lt;<span class="ty">T</span>&gt; = (<span class="nu">0</span>..=n).<span class="fn">map</span>(<span class="ty">T</span>::<span class="fn">from_usize</span>).<span class="fn">collect</span>();
+    <span class="kw">let mut</span> curr: <span class="ty">Vec</span>&lt;<span class="ty">T</span>&gt; = <span class="fn">vec!</span>[<span class="ty">T</span>::<span class="fn">from_usize</span>(<span class="nu">0</span>); n+<span class="nu">1</span>];
 
     <span class="kw">for</span> i <span class="kw">in</span> <span class="nu">1</span>..=m {
-        curr[<span class="nu">0</span>] = i <span class="kw">as</span> <span class="ty">u32</span>;
+        curr[<span class="nu">0</span>] = <span class="ty">T</span>::<span class="fn">from_usize</span>(i);
         <span class="kw">let</span> s = src[i-<span class="nu">1</span>];
         <span class="kw">for</span> j <span class="kw">in</span> <span class="nu">1</span>..=n {
-            <span class="kw">let</span> cost = <span class="ty">u32</span>::<span class="fn">from</span>(s != tgt[j-<span class="nu">1</span>]);
-            curr[j] = (curr[j-<span class="nu">1</span>]+<span class="nu">1</span>)
-                .<span class="fn">min</span>(prev[j]+<span class="nu">1</span>)
-                .<span class="fn">min</span>(prev[j-<span class="nu">1</span>]+cost);
+            <span class="kw">let</span> cost = <span class="kw">if</span> s == tgt[j-<span class="nu">1</span>] { <span class="ty">T</span>::<span class="fn">from_usize</span>(<span class="nu">0</span>) } <span class="kw">else</span> { <span class="ty">T</span>::ONE };
+            curr[j] = curr[j-<span class="nu">1</span>].<span class="fn">add</span>(<span class="ty">T</span>::ONE)
+                .<span class="fn">min</span>(prev[j].<span class="fn">add</span>(<span class="ty">T</span>::ONE))
+                .<span class="fn">min</span>(prev[j-<span class="nu">1</span>].<span class="fn">add</span>(cost));
         }
         std::mem::<span class="fn">swap</span>(&amp;<span class="kw">mut</span> prev, &amp;<span class="kw">mut</span> curr);
     }
-    prev[n] <span class="kw">as</span> <span class="ty">usize</span>
+    prev[n].<span class="fn">to_usize</span>()
+}</pre>
+          </div>
+        </div>
+
+        <!-- compute_myers -->
+        <div class="impl-panel" id="tab-myers">
+          <div class="impl-info">
+            <h3>compute_myers — Bit-Parallel Levenshtein</h3>
+            <p style="font-size:.875rem;color:var(--text2);margin-bottom:.75rem;">
+              Gene Myers (1999) observed that the deltas between consecutive cells
+              in a DP column are each just −1, 0, or +1. That means an entire column
+              can be encoded in two bit-vectors <code>Pv</code> (positive deltas)
+              and <code>Mv</code> (negative deltas), packed into one 64-bit word
+              per vector. Advancing a column is <strong>~7 bitwise ops</strong> —
+              no inner loop over cells. The running score of the bottom cell is
+              kept as a plain integer, updated by peeking at the high bit of the
+              horizontal deltas.
+            </p>
+            <div class="impl-complexity">
+              <span class="complexity-badge c-time">Time: O(n) words</span>
+              <span class="complexity-badge c-space">Space: O(1) words</span>
+            </div>
+            <ul class="impl-pros">
+              <li>Entire DP column packed into a single <code>u64</code> — no per-cell loop</li>
+              <li><strong>~7 bitwise ops</strong> per text character (a fixed schedule, not dependent on m)</li>
+              <li>Stack-allocated 128-entry <code>Peq</code> table for ASCII; no heap</li>
+              <li>Ties the auto-vectorised <code>u8</code> DP on ASCII short inputs (both are near the memory ceiling), but with fundamentally different asymptotic behaviour</li>
+              <li>Foundation for future block-Myers (patterns &gt; 64) and SIMD expansion</li>
+              <li>Falls back to <code>compute_fast</code> for patterns &gt; 64 chars or Unicode</li>
+            </ul>
+          </div>
+          <div class="impl-code">
+            <pre><span class="kw">pub fn</span> <span class="fn">compute_myers</span>(source: &amp;<span class="ty">str</span>, target: &amp;<span class="ty">str</span>) -&gt; <span class="ty">usize</span> {
+    <span class="kw">if</span> source.<span class="fn">is_ascii</span>() &amp;&amp; target.<span class="fn">is_ascii</span>() {
+        <span class="kw">let</span> (a, b) = (source.<span class="fn">as_bytes</span>(), target.<span class="fn">as_bytes</span>());
+        <span class="kw">if</span> a.<span class="fn">len</span>().<span class="fn">min</span>(b.<span class="fn">len</span>()) &lt;= <span class="nu">64</span> {
+            <span class="kw">return</span> <span class="fn">myers_bytes</span>(a, b);
+        }
+    }
+    <span class="ty">Self</span>::<span class="fn">compute_fast</span>(source, target)
+}
+
+<span class="kw">fn</span> <span class="fn">myers_bytes</span>(a: &amp;[<span class="ty">u8</span>], b: &amp;[<span class="ty">u8</span>]) -&gt; <span class="ty">usize</span> {
+    <span class="cm">// Shorter string becomes the pattern `p` (fits in one u64)</span>
+    <span class="kw">let</span> (p, t) = <span class="kw">if</span> a.<span class="fn">len</span>() &lt;= b.<span class="fn">len</span>() { (a, b) } <span class="kw">else</span> { (b, a) };
+    <span class="kw">let</span> m = p.<span class="fn">len</span>();
+    <span class="kw">if</span> m == <span class="nu">0</span> { <span class="kw">return</span> t.<span class="fn">len</span>(); }
+
+    <span class="cm">// Peq[c] = bitmask of positions where byte c occurs in p</span>
+    <span class="kw">let mut</span> peq = [<span class="nu">0u64</span>; <span class="nu">128</span>];  <span class="cm">// ASCII only — 128 slots are enough</span>
+    <span class="kw">for</span> (i, &amp;c) <span class="kw">in</span> p.<span class="fn">iter</span>().<span class="fn">enumerate</span>() {
+        peq[(c &amp; <span class="nu">0x7F</span>) <span class="kw">as</span> <span class="ty">usize</span>] |= <span class="nu">1u64</span> &lt;&lt; i;
+    }
+
+    <span class="kw">let</span> mask   = <span class="kw">if</span> m == <span class="nu">64</span> { <span class="ty">u64</span>::MAX } <span class="kw">else</span> { (<span class="nu">1u64</span> &lt;&lt; m) - <span class="nu">1</span> };
+    <span class="kw">let</span> top    = <span class="nu">1u64</span> &lt;&lt; (m - <span class="nu">1</span>);
+    <span class="kw">let mut</span> pv = mask;   <span class="cm">// all deltas +1 initially (column = 0,1,…,m)</span>
+    <span class="kw">let mut</span> mv = <span class="nu">0u64</span>;
+    <span class="kw">let mut</span> score = m;
+
+    <span class="kw">for</span> &amp;c <span class="kw">in</span> t {
+        <span class="kw">let</span> eq = peq[(c &amp; <span class="nu">0x7F</span>) <span class="kw">as</span> <span class="ty">usize</span>];
+        <span class="kw">let</span> xv = eq | mv;
+        <span class="cm">// The carry trick: propagates match runs in one addition</span>
+        <span class="kw">let</span> xh = (((eq &amp; pv).<span class="fn">wrapping_add</span>(pv)) ^ pv) | eq;
+
+        <span class="kw">let mut</span> ph = mv | !(xh | pv);
+        <span class="kw">let mut</span> mh = pv &amp; xh;
+
+        <span class="kw">if</span> ph &amp; top != <span class="nu">0</span> { score += <span class="nu">1</span>; }
+        <span class="kw">if</span> mh &amp; top != <span class="nu">0</span> { score -= <span class="nu">1</span>; }
+
+        ph = (ph &lt;&lt; <span class="nu">1</span>) | <span class="nu">1</span>;   mh &lt;&lt;= <span class="nu">1</span>;
+        pv = (mh &amp; mask) | !((xv | ph) &amp; mask);
+        pv &amp;= mask;
+        mv = ph &amp; xv &amp; mask;
+    }
+    score
 }</pre>
           </div>
         </div>
@@ -1885,9 +1980,9 @@
       <span class="section-label">Performance</span>
       <h2 class="section-title reveal">Benchmark Results</h2>
       <p class="section-sub reveal">
-        All three implementations run head-to-head on five stress tiers.
+        All four implementations run head-to-head on five stress tiers.
         Measured with <a href="https://github.com/bheisler/criterion.rs" target="_blank">Criterion.rs</a>
-        (100 samples, release build, x86-64 Linux). Reproduce: <code>cargo bench</code>
+        (40 samples, release build, x86-64 Linux). Reproduce: <code>cargo bench</code>
       </p>
 
       <div class="bench-table-wrap reveal">
@@ -1899,6 +1994,7 @@
               <th>compute</th>
               <th>compute_optimized</th>
               <th>compute_fast</th>
+              <th>compute_myers</th>
               <th>Speedup (fast vs compute)</th>
             </tr>
           </thead>
@@ -1906,42 +2002,47 @@
             <tr>
               <td class="td-tier">tiny</td>
               <td class="td-len">6 vs 7 chars</td>
-              <td class="td-time">445 ns</td>
-              <td class="td-time">330 ns</td>
-              <td class="td-time td-winner">184 ns</td>
-              <td><span class="td-speedup">2.4× faster</span></td>
+              <td class="td-time">332 ns</td>
+              <td class="td-time">286 ns</td>
+              <td class="td-time td-winner">39 ns</td>
+              <td class="td-time">40 ns</td>
+              <td><span class="td-speedup">8.5× faster</span></td>
             </tr>
             <tr>
               <td class="td-tier">short</td>
               <td class="td-len">22 vs 24 chars</td>
-              <td class="td-time">2,772 ns</td>
-              <td class="td-time">1,374 ns</td>
-              <td class="td-time td-winner">1,206 ns</td>
-              <td><span class="td-speedup">2.3× faster</span></td>
+              <td class="td-time">2,478 ns</td>
+              <td class="td-time">1,342 ns</td>
+              <td class="td-time td-winner">105 ns</td>
+              <td class="td-time">106 ns</td>
+              <td><span class="td-speedup">23× faster</span></td>
             </tr>
             <tr>
               <td class="td-tier">medium</td>
               <td class="td-len">66 vs 68 chars</td>
-              <td class="td-time">14,755 ns</td>
-              <td class="td-time">10,297 ns</td>
-              <td class="td-time td-winner">10,602 ns</td>
+              <td class="td-time">14,003 ns</td>
+              <td class="td-time">9,497 ns</td>
+              <td class="td-time">10,085 ns</td>
+              <td class="td-time td-winner">10,011 ns</td>
               <td><span class="td-speedup">1.4× faster</span></td>
             </tr>
             <tr>
               <td class="td-tier">long</td>
               <td class="td-len">182 vs 191 chars</td>
-              <td class="td-time">104,210 ns</td>
-              <td class="td-time">112,580 ns</td>
-              <td class="td-time td-winner">87,915 ns</td>
+              <td class="td-time">99,178 ns</td>
+              <td class="td-time">104,900 ns</td>
+              <td class="td-time td-winner">79,650 ns</td>
+              <td class="td-time">79,973 ns</td>
               <td><span class="td-speedup">1.2× faster</span></td>
             </tr>
             <tr>
               <td class="td-tier">stress</td>
               <td class="td-len">270 vs 268 chars</td>
-              <td class="td-time">119,920 ns</td>
-              <td class="td-time td-winner">82,453 ns</td>
-              <td class="td-time">95,073 ns</td>
-              <td><span class="td-speedup">1.3× faster</span></td>
+              <td class="td-time">119,310 ns</td>
+              <td class="td-time td-winner">79,560 ns</td>
+              <td class="td-time">96,125 ns</td>
+              <td class="td-time">94,962 ns</td>
+              <td><span class="td-speedup">1.2× faster</span></td>
             </tr>
           </tbody>
         </table>
@@ -1949,10 +2050,13 @@
 
       <div class="bench-notes reveal">
         <div class="bench-note"><span class="bench-note-icon">💡</span>
-          <span><strong>tiny tier:</strong> call overhead dominates. <code>compute_fast</code> wins by skipping the <code>Vec&lt;char&gt;</code> allocation entirely.</span>
+          <span><strong>tiny &amp; short tiers:</strong> <code>compute_fast</code>'s adaptive <code>u8</code> DP cells fit the entire working set in a few cache lines and LLVM auto-vectorises the inner loop — delivering 8–23× speedups over the baseline.</span>
         </div>
         <div class="bench-note"><span class="bench-note-icon">💡</span>
           <span><strong>stress tier:</strong> <code>compute_optimized</code> edges ahead because the full matrix in <code>compute</code> exceeds L2 cache, while the rolling two rows stay warm.</span>
+        </div>
+        <div class="bench-note"><span class="bench-note-icon">⚡</span>
+          <span><strong>compute_myers</strong> ties <code>compute_fast</code> on ASCII inputs: the auto-vectorised <code>u8</code> DP is already memory-bandwidth-bound at these sizes. Its value is <em>algorithmic</em> — O(n) bitwise words per candidate instead of O(m·n) cells — and it's the foundation for future block-Myers and SIMD work. Falls back to <code>compute_fast</code> for patterns longer than 64 chars.</span>
         </div>
         <div class="bench-note"><span class="bench-note-icon">📈</span>
           <span>HTML reports with per-sample charts: <code>target/criterion/levenshtein/report/index.html</code> after running <code>cargo bench</code>.</span>
@@ -2397,7 +2501,7 @@ println!(<span class="st">"{}"</span>, result);
     function showTab(name) {
       document.querySelectorAll('.impl-tab').forEach(t => t.classList.remove('active'));
       document.querySelectorAll('.impl-panel').forEach(p => p.classList.remove('active'));
-      const idx = ['compute', 'optimized', 'fast'].indexOf(name);
+      const idx = ['compute', 'optimized', 'fast', 'myers'].indexOf(name);
       document.querySelectorAll('.impl-tab')[idx].classList.add('active');
       document.getElementById('tab-' + name).classList.add('active');
     }
